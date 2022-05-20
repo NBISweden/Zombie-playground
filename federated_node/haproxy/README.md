@@ -102,7 +102,11 @@ If the process work as expected, the instance for the haproxy should now be crea
 
 ### Information about updating HAProxy configuration
 
-After any changes to the config has been done they can be applied by running the command below. The `--skip-tags` allows for not running parts of the playbook if they are not being changed.
+After any changes to the config has been done they can be applied by running the command below. The `--skip-tags` allows for not running parts of the playbook if they are not being changed. Run the following ansible-playbook commands:
+
+```sh
+ansible-playbook -i inventory haproxy-config.yml --skip-tags 'configuration'
+```
 
 ```sh
 ansible-playbook -i inventory haproxy-config.yml --skip-tags 'cron,LE'

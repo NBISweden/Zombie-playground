@@ -1,0 +1,185 @@
+- hosts: 127.0.0.1
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Check vault token
+      ansible.builtin.shell: vault token lookup >/dev/null
+      register: result
+      failed_when: "'Error looking up token' in result.stderr"
+      changed_when: not result.stderr
+      tags: vault
+
+    - name: sign certificate
+      ansible.builtin.shell: vault write -field=signed_key bp-ssh/sign/main public_key=@{{ lookup('env','HOME') }}/.ssh/{{ pubkey | default('id_rsa') }}.pub > {{ lookup('env','HOME') }}/.ssh/{{ pubkey | default('id_rsa') }}-cert.pub # noqa line-length
+      changed_when: true
+      tags: vault
+
+- hosts: all
+  become: true
+  vars:
+    haproxy_user: admin
+    haproxy_pass: "{{ password }}"
+  tasks:
+
+    - name: stats password
+      when: password is defined
+      ansible.builtin.lineinfile:
+        path: /etc/haproxy/haproxy.cfg
+        regex: "^(.*)stats auth(.*)$"
+        line: "        stats auth {{ haproxy_user }}:{{ haproxy_pass }}"
+        insertafter: "^defaults$"
+
+    - name: whitelist IPs
+      ansible.builtin.copy:
+        dest: /etc/haproxy/whitelist.acl
+        mode: 0644
+        content: |
+          130.238.0.0/15
+          109.124.177.169/32
+          130.236.0.0/15
+
+    - name: frontends
+      ansible.builtin.blockinfile:
+        path: /etc/haproxy/haproxy.cfg
+        marker: "# {mark} ANSIBLE MANAGED FRONTENDS"
+        block: |
+          frontend http-redirect-https
+                  bind *:80
+                  mode http
+                  option forwardfor
+                  use_backend letsencrypt-backend if { path_beg /.well-known/acme-challenge/ } { hdr(host) -i stats.{{ ansible_host }}.nip.io }
+                  use_backend bp-main-backend-http if { path_beg /.well-known/acme-challenge/ } { hdr_end(host) {{ ansible_host }}.nip.io }
+                  default_backend 301-redirect
+          frontend stats
+                  mode http
+                  bind *:8404 ssl crt /etc/haproxy/certs/
+                  stats enable
+                  stats uri /
+                  stats refresh 10s
+                  stats admin if LOCALHOST
+          frontend ssl-passthrough
+                  bind *:443
+                  mode tcp
+                  option tcplog
+                  tcp-request inspect-delay 5s
+                  tcp-request content accept if { req_ssl_hello_type 1 }
+                  use_backend stats-backend if { req_ssl_sni -i stats.{{ ansible_host }}.nip.io } { src -f /etc/haproxy/whitelist.acl }
+                  use_backend bp-main-k8s if { src -f /etc/haproxy/whitelist.acl } { req_ssl_sni k8s.{{ ansible_host }}.nip.io }
+                  default_backend bp-main-backend
+      tags:
+        - configuration
+
+    - name: backend
+      ansible.builtin.blockinfile:
+        path: /etc/haproxy/haproxy.cfg
+        marker: "# {mark} ANSIBLE MANAGED BACKENDS"
+        block: |
+          backend 301-redirect
+                  http-request redirect scheme https code 301 if ! { ssl_fc }
+          backend letsencrypt-backend
+                  server letsencrypt 127.0.0.1:8888
+          backend stats-backend
+                  mode tcp
+                  cookie SERVERUSED insert indirect nocache
+                  server local 127.0.0.1:8404 check
+          backend bp-main-backend-http
+                  balance leastconn
+                  server bp-main-worker-1 192.168.0:80 check send-proxy-v2
+                  server bp-main-worker-2 192.168.0.252:80 check send-proxy-v2
+                  server bp-main-worker-3 192.168.2.210:80 check send-proxy-v2
+                  server bp-main-worker-4 192.168.2.174:80 check send-proxy-v2
+                  server bp-main-worker-5 192.168.2.211:80 check send-proxy-v2
+          backend bp-main-backend
+                  mode tcp
+                  balance leastconn
+                  option httpchk GET "/healthz"
+                  option ssl-hello-chk
+                  server bp-main-worker-1 192.168.3.222:443 check send-proxy-v2
+                  server bp-main-worker-2 192.168.1.43:443 check send-proxy-v2
+                  server bp-main-worker-3 192.168.2.210:443 check send-proxy-v2
+                  server bp-main-worker-4 192.168.2.174:443 check send-proxy-v2
+                  server bp-main-worker-5 192.168.2.211:443 check send-proxy-v2
+          backend bp-main-k8s
+                  mode tcp
+                  balance leastconn
+                  option ssl-hello-chk
+                  server bp-main-master-1 192.168.2.148:6443 check
+                  server bp-main-master-2 192.168.2.109:6443 check
+                  server bp-main-master-3 192.168.2.87:6443 check
+
+      tags:
+        - configuration
+
+    - name: Creates certificate directory # noqa 208
+      ansible.builtin.file:
+        path: /etc/haproxy/certs
+        state: directory
+      tags:
+        - LE
+
+    - name: validate config
+      ansible.builtin.command: haproxy -V -c -f /etc/haproxy/haproxy.cfg
+      changed_when: false
+      tags:
+        - configuration
+    - name: reload haproxy
+      ansible.builtin.service:
+        name: haproxy
+        state: reloaded
+      tags:
+        - configuration
+    # setup cert-bot
+    - name: Ensure snapd is installed.
+      ansible.builtin.package:
+        name: snapd
+        state: present
+      register: snapd_install
+
+    - name: Ensure snapd is enabled.
+      ansible.builtin.systemd:
+        name: snapd.socket
+        enabled: true
+        state: started
+
+    - name: Update snap after install.
+      ansible.builtin.shell: snap install core; snap refresh core
+      changed_when: true
+      failed_when: false
+      when: snapd_install is changed
+      # noqa 503
+
+    - name: Install certbot via snap.
+      ansible.builtin.snap:
+        name: certbot
+        classic: true
+      register: certbot_installed
+
+    - name: Symlink certbot into place.
+      ansible.builtin.file:
+        src: /snap/bin/certbot
+        dest: /usr/bin/certbot
+        state: link
+      when: certbot_installed is changed
+      # noqa 503
+
+    - name: Check if certificate already exists.
+      ansible.builtin.stat:
+        path: /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/cert.pem
+      register: letsencrypt_cert
+      tags:
+        - LE
+
+    - name: Generate new certificate if one doesn't exist.
+      ansible.builtin.command: >-
+        /usr/bin/certbot certonly --standalone --noninteractive --agree-tos
+        --email bp-ops@nbis.se
+        -d stats.{{ ansible_host }}.nip.io
+      when: not letsencrypt_cert.stat.exists
+      tags:
+        - LE
+
+    - name: Concatenate certificate
+      ansible.builtin.shell: "cat /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/fullchain.pem /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/privkey.pem > /etc/haproxy/certs/stats.{{ ansible_host }}.nip.io.pem"  # noqa line-length
+      when: letsencrypt_cert.stat.exists
+      tags:
+        - LE
