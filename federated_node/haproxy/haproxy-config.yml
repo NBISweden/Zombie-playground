@@ -84,8 +84,8 @@
                   server local 127.0.0.1:8404 check
           backend bp-main-backend-http
                   balance leastconn
-                  server bp-main-worker-1 192.168.0:80 check send-proxy-v2
-                  server bp-main-worker-2 192.168.0.252:80 check send-proxy-v2
+                  server bp-main-worker-1 10.65.1.184:80 check send-proxy-v2
+                  server bp-main-worker-2 10.65.0.132:80 check send-proxy-v2
                   server bp-main-worker-3 192.168.2.210:80 check send-proxy-v2
                   server bp-main-worker-4 192.168.2.174:80 check send-proxy-v2
                   server bp-main-worker-5 192.168.2.211:80 check send-proxy-v2
@@ -94,8 +94,8 @@
                   balance leastconn
                   option httpchk GET "/healthz"
                   option ssl-hello-chk
-                  server bp-main-worker-1 192.168.3.222:443 check send-proxy-v2
-                  server bp-main-worker-2 192.168.1.43:443 check send-proxy-v2
+                  server bp-main-worker-1 10.65.1.184:443 check send-proxy-v2
+                  server bp-main-worker-2 10.65.0.132:443 check send-proxy-v2
                   server bp-main-worker-3 192.168.2.210:443 check send-proxy-v2
                   server bp-main-worker-4 192.168.2.174:443 check send-proxy-v2
                   server bp-main-worker-5 192.168.2.211:443 check send-proxy-v2
@@ -103,8 +103,8 @@
                   mode tcp
                   balance leastconn
                   option ssl-hello-chk
-                  server bp-main-master-1 192.168.2.148:6443 check
-                  server bp-main-master-2 192.168.2.109:6443 check
+                  server bp-main-master-1 10.65.1.115:6443 check
+                  server bp-main-master-2 10.65.3.49:6443 check
                   server bp-main-master-3 192.168.2.87:6443 check
 
       tags:
