@@ -10,7 +10,7 @@
       tags: vault
 
     - name: sign certificate
-      ansible.builtin.shell: vault write -field=signed_key bp-ssh/sign/main public_key=@{{ lookup('env','HOME') }}/.ssh/{{ pubkey | default('id_rsa') }}.pub > {{ lookup('env','HOME') }}/.ssh/{{ pubkey | default('id_rsa') }}-cert.pub # noqa line-length
+      ansible.builtin.shell: vault write -field=signed_key bp-ssh/sign/main public_key=@{{ lookup('env','HOME') }}/.ssh/{{ pubkey | default('id_rsa') }}.pub > {{ lookup('env','HOME') }}/.ssh/{{ pubkey | default('id_rsa') }}-cert.pub # noqa yaml[line-length]
       changed_when: true
       tags: vault
 
@@ -179,7 +179,7 @@
         - LE
 
     - name: Concatenate certificate
-      ansible.builtin.shell: "cat /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/fullchain.pem /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/privkey.pem > /etc/haproxy/certs/stats.{{ ansible_host }}.nip.io.pem"  # noqa line-length
+      ansible.builtin.shell: "cat /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/fullchain.pem /etc/letsencrypt/live/stats.{{ ansible_host }}.nip.io/privkey.pem > /etc/haproxy/certs/stats.{{ ansible_host }}.nip.io.pem"  # noqa yaml[line-length]
       when: letsencrypt_cert.stat.exists
       tags:
         - LE
